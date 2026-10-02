@@ -1,0 +1,161 @@
+# M7 explanation rules. Every message must cite at least one measured number (checked when the file loads).
+#
+#   id          unique name
+#   applies_to  any | face | text | subject | layer | background | frame
+#   when        expression over the facts below; a missing (None) number makes a comparison false, never an error
+#   priority    higher first; each element keeps its 4 best messages, the frame its 3 best
+#   fallback    (optional) only used when fewer than 2 other messages matched, so every element is explained
+#   message     template; {placeholders} are measured facts
+#
+# Element facts: label, text, type, attention_pct, area_pct, density, predicted_rank, intent_rank, local_contrast,
+#   saturation_pop, saturation_pop_pct, colour_distinctness, dist_to_thirds, dist_to_center, safe_zone_overlap_pct,
+#   text_contrast_ratio, mobile_match_pct, mobile_legible, top_driver, top_driver_phrase, colour_name
+# Frame facts: balance_x, balance_y, balance_x_pct, balance_y_pct, balance_side_x, balance_side_y, focal_points,
+#   negative_space_pct, palette_top_name, palette_top_pct, text_area_pct, face_count
+
+# ---------- elements ----------
+- id: hierarchy_mismatch
+  applies_to: any
+  when: "intent_rank is not None and predicted_rank != intent_rank"
+  priority: 100
+  message: "You want {label} seen #{intent_rank}, but viewers will see it #{predicted_rank}."
+
+- id: text_low_contrast
+  applies_to: text
+  when: "text_contrast_ratio is not None and text_contrast_ratio < 3.0 and area_pct >= 1.0"
+  priority: 90
+  message: "{label} gets {attention_pct}% of attention while covering {area_pct}% of the frame. Its contrast against the background is only {text_contrast_ratio}:1."
+
+- id: text_not_mobile_legible
+  applies_to: text
+  when: "mobile_legible == false"
+  priority: 85
+  message: "\"{text}\" is not readable at phone size: only {mobile_match_pct}% of its letters survive the 168 px feed render. Viewers on phones will skip it."
+
+- id: in_safe_zone
+  applies_to: any
+  when: "safe_zone_overlap_pct is not None and safe_zone_overlap_pct > 20 and type != 'background'"
+  priority: 80
+  message: "{safe_zone_overlap_pct}% of {label} sits under the YouTube timestamp or progress bar."
+
+- id: element_punches_above
+  applies_to: any
+  when: "type != 'background' and density is not None and density >= 2.0"
+  priority: 70
+  message: "{label} draws {density}x more attention than its size suggests ({attention_pct}% of attention from {area_pct}% of the frame), driven by {top_driver_phrase}."
+
+- id: element_underperforms
+  applies_to: any
+  when: "type != 'background' and density is not None and density < 0.5 and area_pct >= 3"
+  priority: 65
+  message: "{label} covers {area_pct}% of the frame but gets only {attention_pct}% of attention ({density}x its size)."
+
+- id: face_main_draw
+  applies_to: face
+  when: "attention_pct >= 30 and density is not None and density < 2.0"
+  priority: 62
+  message: "{label} is the main draw: {attention_pct}% of attention from {area_pct}% of the frame."
+
+- id: text_takes_over
+  applies_to: text
+  when: "attention_pct >= 35"
+  priority: 60
+  message: "{label} takes {attention_pct}% of the attention in this thumbnail."
+
+- id: subject_blends_in
+  applies_to: subject
+  when: "colour_distinctness is not None and local_contrast is not None and colour_distinctness < 12 and local_contrast < 0.10"
+  priority: 58
+  message: "{label} is close in colour to the rest of the frame (distance {colour_distinctness}) and has low local contrast ({local_contrast}), so it blends into its surroundings."
+
+- id: low_local_contrast
+  applies_to: any
+  when: "type != 'background' and local_contrast is not None and local_contrast < 0.06 and area_pct >= 3"
+  priority: 56
+  message: "{label} has very low local contrast ({local_contrast}) against the 24 px around it."
+
+- id: saturation_pop
+  applies_to: any
+  when: "type != 'background' and saturation_pop is not None and saturation_pop >= 0.20"
+  priority: 50
+  message: "{label} is {saturation_pop_pct}% more saturated than the frame average."
+
+- id: face_small
+  applies_to: face
+  when: "area_pct < 2.5"
+  priority: 45
+  message: "{label} covers only {area_pct}% of the frame and holds {attention_pct}% of attention."
+
+- id: near_thirds
+  applies_to: any
+  when: "type != 'background' and dist_to_thirds is not None and dist_to_thirds < 0.06 and attention_pct >= 10"
+  priority: 40
+  message: "{label} sits {dist_to_thirds} of the frame diagonal from a thirds point and holds {attention_pct}% of attention."
+
+- id: share_summary
+  applies_to: any
+  when: "density is not None"
+  fallback: true
+  priority: 10
+  message: "{label} gets {attention_pct}% of attention for {area_pct}% of the frame ({density}x its size)."
+
+# ---------- whole frame ----------
+- id: frame_balance_horizontal
+  applies_to: frame
+  when: "balance_x is not None and abs(balance_x) > 0.25"
+  priority: 80
+  message: "Attention is weighted to the {balance_side_x}: its centre of mass sits {balance_x_pct}% of the way from the centre to the {balance_side_x} edge."
+
+- id: frame_balance_vertical
+  applies_to: frame
+  when: "balance_y is not None and abs(balance_y) > 0.25"
+  priority: 70
+  message: "Attention is weighted to the {balance_side_y}: its centre of mass sits {balance_y_pct}% of the way from the centre to the {balance_side_y} edge."
+
+- id: frame_many_focal_points
+  applies_to: frame
+  when: "focal_points is not None and focal_points >= 5"
+  priority: 75
+  message: "{focal_points} separate focal points compete for attention."
+
+- id: frame_one_focal_point
+  applies_to: frame
+  when: "focal_points == 1 and negative_space_pct is not None"
+  priority: 60
+  message: "One focal point holds the attention; {negative_space_pct}% of the frame draws almost none."
+
+- id: frame_two_focal_points
+  applies_to: frame
+  when: "focal_points == 2 and negative_space_pct is not None"
+  priority: 60
+  message: "Attention splits between {focal_points} focal points; {negative_space_pct}% of the frame draws almost none."
+
+- id: frame_empty_space
+  applies_to: frame
+  when: "negative_space_pct is not None and negative_space_pct > 65"
+  priority: 55
+  message: "{negative_space_pct}% of the frame draws almost no attention."
+
+- id: frame_crowded
+  applies_to: frame
+  when: "negative_space_pct is not None and negative_space_pct < 20"
+  priority: 55
+  message: "Only {negative_space_pct}% of the frame is calm: attention is spread across most of the thumbnail."
+
+- id: frame_dominant_colour
+  applies_to: frame
+  when: "palette_top_pct >= 45"
+  priority: 50
+  message: "{palette_top_name} covers {palette_top_pct}% of the frame."
+
+- id: frame_text_heavy
+  applies_to: frame
+  when: "text_area_pct >= 30"
+  priority: 65
+  message: "Text covers {text_area_pct}% of the frame."
+
+- id: frame_balanced
+  applies_to: frame
+  when: "balance_x is not None and abs(balance_x) <= 0.1 and abs(balance_y) <= 0.1"
+  priority: 20
+  message: "Attention is well balanced: its centre of mass is within {balance_x_pct}% (horizontal) and {balance_y_pct}% (vertical) of the frame centre."

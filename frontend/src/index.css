@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+:root { color-scheme: light dark; }
+body { @apply bg-stone-50 text-stone-900 antialiased; overflow-x: clip; }
+@media (prefers-color-scheme: dark) {
+  body { @apply bg-stone-950 text-stone-100; }
+}
+
+/* Gaze path animation: each segment draws in, each fixation pops in, staggered by --d. */
+@keyframes draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes pop { from { opacity: 0; transform: scale(0.3); } to { opacity: 1; transform: scale(1); } }
+.gaze-seg { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 450ms ease-out forwards; animation-delay: var(--d); }
+.gaze-dot { opacity: 0; transform-box: fill-box; transform-origin: center; animation: pop 280ms ease-out forwards; animation-delay: var(--d); }
+@media (prefers-reduced-motion: reduce) {
+  .gaze-seg { animation: none; stroke-dashoffset: 0; }
+  .gaze-dot { animation: none; opacity: 1; }
+}

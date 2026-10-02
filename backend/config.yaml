@@ -1,0 +1,85 @@
+# Thumbnail Attention Studio: backend constants (PRD v2). Every tunable lives here, nothing is hard-coded in modules.
+
+ingest:
+  target_size: [1280, 720]
+  max_bytes: 10485760        # 10 MB upload cap
+  max_pixels: 40000000
+  min_size: [320, 180]
+  crop_tolerance: 0.12       # within 12% of 16:9 -> centre-crop; further off -> letterbox so no content is lost
+  youtube_image_timeout_s: 8
+
+preprocess:
+  saliency_input_width: 512  # DeepGaze input (aspect kept); 512 px ~1.3 s on a laptop CPU, 768 px ~4.6 s
+  mobile_size: [168, 94]     # how the thumbnail looks in a phone feed
+  # YouTube overlays, as fractions of the frame: [x0, y0, x1, y1]
+  safe_zone:
+    duration_badge: [0.86, 0.88, 1.0, 1.0]   # about 14% wide x 12% tall, bottom right
+    progress_bar: [0.0, 0.97, 1.0, 1.0]      # bottom 3%
+
+saliency:
+  # Tried in this order; the first that loads and runs wins. The last entry must work without any weights.
+  backends: [deepgaze_iie, msinet_tf, opencv_fine_grained]
+  optional_backends: [msinet_tf]   # may be absent (needs TensorFlow, which some machines block): never reported as an error
+  torch_threads: 8
+  msinet_tf:
+    saved_model: weights/msinet_tf              # original TensorFlow SavedModel (alexanderkroner/MSI-Net on Hugging Face)
+  deepgaze_iie:
+    centerbias: weights/centerbias_mit1003.npy   # MIT1003 template from the official repo
+  render:
+    heatmap_size: [640, 360]
+    colormap: inferno
+    display_gamma: 0.55      # <1 widens the visible area so the tail of the distribution shows (display only; maths uses the raw map)
+    low_cut: 0.15            # normalized attention below this is fully transparent
+    preview_size: [960, 540]
+
+cache:
+  enabled: true
+
+elements:
+  workers: 3                 # M3 (saliency), M3b (scanpath) and M4 (elements) run in parallel
+  face:
+    model: weights/mediapipe/blaze_face_short_range.tflite
+    min_confidence: 0.45
+    expand: 0.15             # box grown by 15% of its size on every side, for hair and edges; mask = ellipse in that box
+  text:
+    min_score: 0.5           # OCR recognition confidence
+    min_chars: 2             # drops single-glyph logos and icons
+    min_height_px: 12
+    det_limit_side_len: 768
+    threads: 2
+    merge_gap: 0.6           # lines closer than 0.6 x line height (and horizontally overlapping) form one block
+    unrecognised_min_height_px: 28   # big text boxes whose script OCR cannot read (e.g. Malayalam) still count as text
+    pad_px: 3
+  subject:
+    model: u2net
+    threshold: 127
+    min_area_pct: 2.0        # a subject smaller than 2% of the frame is not a subject
+    max_components: 2
+    component_ratio: 0.25    # keep components at least 25% the size of the largest
+
+scanpath:                    # M3b: DeepGaze III predicts the next fixation from the fixations so far
+  fixations: 5
+  exclusion_frac: 0.09       # radius (fraction of frame width) around the start and earlier fixations that cannot be chosen again
+
+attention:
+  scanpath:                  # winner-take-all fallback on the saliency map, used only if DeepGaze III is unavailable
+    max_fixations: 5
+    min_fixations: 3
+    inhibition_sigma_frac: 0.08
+    exclusion_frac: 0.09     # hard minimum distance between fixations, as a fraction of frame width
+    min_ratio: 0.25          # later fixations weaker than 25% of the first are dropped (min_fixations always kept)
+    work_width: 320
+
+features:                    # M5
+  ring_px: 24                # surroundings used for local contrast
+  text_ring_px: 6            # surroundings used for text contrast
+  mobile_match_min: 0.70     # a text block is mobile-legible if OCR on the phone render recovers >= 70% of its letters (edit distance <= 30%)
+  mobile_ocr_upscale: 3      # the 168 px phone render is enlarged this much before OCR
+  palette_k: 5
+  focal:
+    work_width: 320
+    min_distance_frac: 0.10  # non-max suppression window, fraction of frame width
+    min_strength: 0.25       # a peak must reach 25% of the strongest
+    max_points: 8
+  negative_space_factor: 0.25   # a pixel is "empty" if its attention is below 25% of a uniform spread
+  contrast_map_sigma_frac: 0.02  # contrast layer: |L - blur(L)| with this blur, as a fraction of frame width

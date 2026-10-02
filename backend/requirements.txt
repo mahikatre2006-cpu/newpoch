@@ -1,0 +1,37 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+python-dotenv
+pyyaml
+pillow
+httpx
+pytest
+psycopg[binary,pool]   # only used when DATABASE_URL points at Neon/Postgres
+
+# numeric stack. numpy/numba are pinned because newer numba DLLs are blocked by Windows Application Control on the dev laptop.
+numpy==2.0.2
+numba==0.60.0
+llvmlite==0.43.0
+scipy
+scikit-learn
+opencv-contrib-python-headless==4.11.0.86   # contrib: cv2.saliency (fallback model). Never install plain opencv-python alongside.
+
+# models (PRD section 8)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu       # 2.14 was blocked by Windows Application Control; 2.5.1 loads
+torchvision==0.20.1+cpu
+mediapipe              # M4 faces
+rembg                  # M4 subject cutout (u2net)
+onnxruntime            # used by rapidocr and rembg internally; we do no ONNX conversion
+rapidocr-onnxruntime   # M4 text. If pip pulls plain opencv-python, run: pip install --no-deps rapidocr-onnxruntime
+pyclipper
+shapely
+six
+tqdm
+einops
+ftfy
+regex
+# DeepGaze IIE and CLIP (imported by deepgaze_pytorch) come from GitHub, not PyPI:
+#   pip install --no-deps git+https://github.com/matthias-k/DeepGaze.git
+#   pip install --no-deps git+https://github.com/openai/CLIP.git

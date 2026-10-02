@@ -1,0 +1,5 @@
+public/samples/
+node_modules
+dist
+public/mediapipe/
+public/webgazer.js
