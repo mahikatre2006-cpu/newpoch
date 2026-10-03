@@ -85,9 +85,82 @@ export interface AnalysisResult {
   timing_ms: Record<string, number>;
   errors: string[];
   cached: boolean;
+  version_id?: string | null;
 }
 
 export interface Health {
   status: "ok" | "degraded";
   saliency: { loaded: string[]; unavailable: Record<string, string>; fallback_active: boolean; elements: { loaded: string[]; unavailable: Record<string, string> }; scanpath: { loaded: string[]; unavailable: Record<string, string> } };
+}
+
+// ---- M8 ablation, M10 fixes, M11 versions ----
+export interface AblationFlow {
+  element_id: string;
+  label: string;
+  before_pct: number;
+  after_pct: number;
+  delta_pct: number;
+}
+
+export interface AblationResult {
+  removed: { element_id: string; label: string; attention_pct: number; method: "inpaint" | "blur_fill" };
+  flow: AblationFlow[];
+  ablated_heatmap_png: string;
+  ablated_image_jpg: string;
+  message: string;
+  saliency_model: string;
+}
+
+export interface Version {
+  version_id: string;
+  session_id: string;
+  analysis_id: string;
+  parent_id: string | null;
+  label: string;
+  kind: "upload" | "edit" | "fix";
+  created_at: string;
+}
+
+export interface ChangeRow {
+  label: string;
+  type: string;
+  a_id: string | null;
+  b_id: string | null;
+  a_pct: number | null;
+  b_pct: number | null;
+  delta_pct: number | null;
+  status: "matched" | "removed" | "new";
+}
+
+export type FixName = "focus_subject" | "fix_text" | "enhance" | "separate_layers";
+
+export interface FixLayer {
+  name: string;
+  type: "image" | "subject";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  mime: string;
+  data: string; // base64
+}
+
+export interface FixResult {
+  fix: FixName;
+  label: string;
+  version?: Version;
+  analysis: AnalysisResult | null;
+  changes?: ChangeRow[];
+  hierarchy_before?: string[];
+  hierarchy_after?: string[];
+  message?: string;
+  layers?: FixLayer[];
+}
+
+export interface CompareResult {
+  a: { version: Version; image_jpg: string; heatmap_png: string; saliency_model: string };
+  b: { version: Version; image_jpg: string; heatmap_png: string; saliency_model: string };
+  rows: ChangeRow[];
+  hierarchy_a: string[];
+  hierarchy_b: string[];
 }

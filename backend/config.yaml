@@ -83,3 +83,29 @@ features:                    # M5
     max_points: 8
   negative_space_factor: 0.25   # a pixel is "empty" if its attention is below 25% of a uniform spread
   contrast_map_sigma_frac: 0.02  # contrast layer: |L - blur(L)| with this blur, as a fraction of frame width
+
+ablation:                    # M8
+  inpaint_max_area_pct: 8.0  # smaller than this (and not a face/subject): Telea inpainting; otherwise blurred-background fill
+  inpaint_radius: 5
+  dilate_px: 4               # grow the mask a little so no fringe of the removed element is left
+  fill_sigmas: [15, 40, 100, 250]   # blurred-fill passes, finer to coarser, until every pixel of the hole is filled
+
+fixes:                       # M10
+  focus:
+    blur_sigma: 9
+    darken: 0.25
+    outline_px: 6
+    feather_px: 3
+  enhance:
+    clahe_clip: 2.0
+    clahe_tiles: 8
+    saturation_gain: 1.10
+  text:
+    min_contrast: 4.5        # text below this WCAG ratio (or unreadable at phone size) gets a stroke and shadow
+    stroke_px: 4
+    shadow_offset_px: 5
+    shadow_blur_px: 6
+    shadow_opacity: 0.55
+  cutout:
+    close_px: 9
+    feather_px: 2

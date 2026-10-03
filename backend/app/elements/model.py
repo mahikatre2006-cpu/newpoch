@@ -30,6 +30,11 @@ class Element:
     meta: dict = field(default_factory=dict)
 
 
+def is_text_like(e: "Element") -> bool:
+    """Detected text, or an editor layer the creator marked as text: both get the text measurements and rules."""
+    return e.type == "text" or (e.type == "layer" and e.meta.get("layer_type") == "text")
+
+
 @dataclass
 class ElementSet:
     elements: list[Element]

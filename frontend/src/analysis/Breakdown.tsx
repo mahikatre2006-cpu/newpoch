@@ -7,10 +7,12 @@ const pct = (v: number) => `${v.toFixed(1)}%`;
 interface Props {
   elements: Element[];
   onHover: (id: string | null) => void;
+  onAblate?: (id: string) => void; // 'what if this were removed?'
+  ablatingId?: string | null;
 }
 
 /** Attention breakdown: who gets how much attention, how big they are, how hard they pull for their size, and why. */
-export default function Breakdown({ elements, onHover }: Props) {
+export default function Breakdown({ elements, onHover, onAblate, ablatingId }: Props) {
   const rows = [...elements].sort((a, b) => a.predicted_rank - b.predicted_rank);
   const maxDensity = Math.max(2, ...rows.map((r) => r.density ?? 0));
   return (
@@ -64,6 +66,11 @@ export default function Breakdown({ elements, onHover }: Props) {
               <tr onMouseEnter={() => onHover(e.id)} onMouseLeave={() => onHover(null)}>
                 <td />
                 <td colSpan={4} className="pb-2 pr-1">
+                  {onAblate && e.type !== "background" && (
+                    <button type="button" disabled={!!ablatingId} onClick={() => onAblate(e.id)} className="mb-1 rounded border border-stone-300 px-2 py-0.5 text-xs hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-amber-500 disabled:opacity-50 dark:border-stone-700 dark:hover:bg-stone-800">
+                      {ablatingId === e.id ? "Removing…" : `What if ${e.label.length > 22 ? "it" : e.label} were removed?`}
+                    </button>
+                  )}
                   {e.explanations && e.explanations.length > 0 && (
                     <ul className="list-disc space-y-0.5 pl-4 text-xs text-stone-700 dark:text-stone-300">
                       {e.explanations.map((m, i) => <li key={i}>{m}</li>)}

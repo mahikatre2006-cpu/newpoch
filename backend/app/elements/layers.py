@@ -1,6 +1,7 @@
 """M4 editor layers. When the editor sends layers they replace detection: exact masks, user-given names.
 
-Payload: a list, bottom to top, of {"name": str, "type": "image|subject|text|shape" (optional), "mask": base64 PNG}.
+Payload: a list, bottom to top, of {"name": str, "type": "image|subject|text|shape" (optional), "mask": base64 PNG,
+"text": str (optional, for text layers: the exact string, so no OCR is needed to know what it says)}.
 The mask's alpha channel (or its grey value when it has no alpha) says where the layer is; any size, it is resized.
 Where layers overlap the one on top owns the pixel (what a viewer sees); pixels no layer covers are background.
 """
@@ -35,21 +36,23 @@ def elements_from_layers(layers: list, shape: tuple[int, int]) -> ElementSet:
         raise LayerError("layers must be a non-empty list")
     h, w = shape
     labels = np.zeros((h, w), np.int16)
-    meta: list[tuple[str, str]] = []
+    meta: list[tuple[str, str, str | None]] = []
     for i, layer in enumerate(layers):
         if not isinstance(layer, dict) or not isinstance(layer.get("mask"), str):
             raise LayerError(f"layer {i} needs a base64 'mask'")
         name = str(layer.get("name") or f"Layer {i + 1}")[:60]
         labels[decode_mask(layer["mask"], shape)] = len(meta) + 1  # later (higher) layers overwrite
-        meta.append((name, str(layer.get("type") or "layer")))
+        ltype = str(layer.get("type") or "layer")
+        text = str(layer["text"]).strip()[:200] if ltype == "text" and isinstance(layer.get("text"), str) and layer["text"].strip() else None
+        meta.append((name, ltype, text))
     elements = [Element("background", "background", "Background", [0, 0, w, h], 0)]
     remap = np.zeros(len(meta) + 1, np.int16)
-    for n, (name, ltype) in enumerate(meta, start=1):
+    for n, (name, ltype, text) in enumerate(meta, start=1):
         area = int((labels == n).sum())
         if area == 0:
             continue  # fully covered by layers above it
         remap[n] = len(elements)
-        elements.append(Element(f"layer_{n - 1}", "layer", name, bbox(labels == n), area, None, {"layer_type": ltype}))
+        elements.append(Element(f"layer_{n - 1}", "layer", name, bbox(labels == n), area, text, {"layer_type": ltype}))
     labels = remap[labels]
     elements[0].area_px = int((labels == 0).sum())
     elements[0].box = bbox(labels == 0)

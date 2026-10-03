@@ -9,7 +9,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from app.elements import ElementSet
+from app.elements import ElementSet, is_text_like
 from app.preprocess import Context
 from app.saliency.render import COLORMAPS, normalise_for_display
 from .color import colour_name, lab_distance, palette, to_lab, wcag_contrast
@@ -61,19 +61,34 @@ def local_contrast(gray: np.ndarray, mask: np.ndarray, box: list[int], px: int) 
     return float(np.sqrt(np.mean((g[inside] - ring_mean) ** 2)) / 255.0)
 
 
-def text_contrast(rgb: np.ndarray, mask: np.ndarray, box: list[int], px: int) -> float | None:
-    """WCAG ratio between the text colour and its surroundings. Background = median colour of the ring around the
-    block; text = median of the quarter of in-block pixels furthest from that background."""
-    ring, win = ring_of(mask, box, px)
+def text_colours(rgb: np.ndarray, mask: np.ndarray, box: list[int], px: int, rim_px: int = 3, glyph_mask: bool = False) -> tuple[np.ndarray, np.ndarray] | None:
+    """(text colour, colour behind the text) for a text block.
+    The colour behind the text is read from the rim just INSIDE the block's edge, so text on a coloured plate (white on a
+    dark pill) is measured against the plate, not against whatever lies beyond it; with no usable rim it falls back to the
+    ring just outside. With glyph_mask (an editor text layer, whose mask is the letter shapes themselves) the colour behind
+    the text is the ring just outside the mask. The text colour is the median of the quarter of in-mask pixels furthest from it."""
+    win = _window(box, px + 2, mask.shape)
     inside = mask[win]
-    if ring.sum() < 20 or inside.sum() < 10:
+    if inside.sum() < 10:
         return None
     pix = rgb[win]
-    bg = np.median(pix[ring], axis=0)
+    m8 = inside.astype(np.uint8)
+    rim = inside & ~cv2.erode(m8, np.ones((2 * rim_px + 1, 2 * rim_px + 1), np.uint8)).astype(bool)
+    if glyph_mask or rim.sum() < 20:
+        rim, _ = ring_of(mask, box, px)
+        if rim.sum() < 20:
+            return None
+    bg = np.median(pix[rim], axis=0)
     px_in = pix[inside].astype(np.float32)
     dist = np.linalg.norm(px_in - bg, axis=1)
     far = px_in[dist >= np.quantile(dist, 0.75)]
-    return wcag_contrast(np.median(far, axis=0), bg)
+    return np.median(far, axis=0), bg
+
+
+def text_contrast(rgb: np.ndarray, mask: np.ndarray, box: list[int], px: int, glyph_mask: bool = False) -> float | None:
+    """WCAG ratio between the text colour and the colour directly behind it (see text_colours)."""
+    c = text_colours(rgb, mask, box, px, glyph_mask=glyph_mask)
+    return None if c is None else wcag_contrast(*c)
 
 
 def focal_points(sal: np.ndarray, cfg: dict) -> list[dict]:
@@ -128,7 +143,7 @@ def compute_features(ctx: Context, eset: ElementSet, sal: np.ndarray | None, cfg
 
     # phone-size OCR, once, only if there is any text to check
     mobile_lines = []
-    needs_mobile = any(e.type == "text" and e.text for e in eset.elements)
+    needs_mobile = any(is_text_like(e) and e.text for e in eset.elements)
     if mobile_ocr is not None and needs_mobile:
         # the 168 px render enlarged 3x: OCR cannot invent detail, it only has to see what a phone viewer sees
         up = cv2.resize(ctx.mobile_small, None, fx=fc["mobile_ocr_upscale"], fy=fc["mobile_ocr_upscale"], interpolation=cv2.INTER_CUBIC)
@@ -156,8 +171,8 @@ def compute_features(ctx: Context, eset: ElementSet, sal: np.ndarray | None, cfg
             f["colour_distinctness"] = round(lab_distance(img[mask].mean(axis=0).round(), frame_mean.round()), 1)
             f["mean_colour"] = "#%02X%02X%02X" % tuple(int(v) for v in img[mask].mean(axis=0).round())
             f["colour_name"] = colour_name(img[mask].mean(axis=0))
-        if e.type == "text" and xs.size:
-            tc = text_contrast(img, mask, e.box, fc["text_ring_px"])
+        if is_text_like(e) and xs.size:
+            tc = text_contrast(img, mask, e.box, fc["text_ring_px"], glyph_mask=(e.type == "layer"))
             f["text_contrast_ratio"] = None if tc is None else round(tc, 2)
             if e.text:
                 bx0, by0, bx1, by1 = e.box
@@ -180,7 +195,7 @@ def compute_features(ctx: Context, eset: ElementSet, sal: np.ndarray | None, cfg
 
     # ---- frame ----
     frame: dict = {"palette": palette(img, fc["palette_k"])}
-    text_area = sum(e.area_px for e in eset.elements if e.type == "text")
+    text_area = sum(e.area_px for e in eset.elements if is_text_like(e))
     frame["text_area_pct"] = round(100.0 * text_area / (h * w), 1)
     views: dict = {}
     if sal is not None:
@@ -197,7 +212,7 @@ def compute_features(ctx: Context, eset: ElementSet, sal: np.ndarray | None, cfg
     views["text"] = [
         {"element_id": e.id, "box": e.box, "text": e.text, "contrast_ratio": per[e.id].get("text_contrast_ratio"),
          "mobile_legible": per[e.id].get("mobile_legible"), "safe_zone_overlap_pct": per[e.id].get("safe_zone_overlap_pct")}
-        for e in eset.elements if e.type == "text"]
+        for e in eset.elements if is_text_like(e)]
     views["colour"] = {"palette": frame["palette"], "frame_saturation": round(frame_sat, 3)}
     views["contrast_png"] = contrast_png(gray, fc["contrast_map_sigma_frac"])
     sz = cfg["preprocess"]["safe_zone"]

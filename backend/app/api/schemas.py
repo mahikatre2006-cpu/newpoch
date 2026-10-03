@@ -24,8 +24,20 @@ class AnalysisResult(BaseModel):
     timing_ms: dict[str, int]
     errors: list[str]
     cached: bool = False
+    version_id: str | None = None  # set when this analysis was saved as a version
 
 
 class Health(BaseModel):
     status: str  # "ok" | "degraded" (running on a fallback)
     saliency: dict[str, Any]
+
+
+class AblateRequest(BaseModel):
+    analysis_id: str
+    element_id: str
+
+
+class FixRequest(BaseModel):
+    analysis_id: str
+    fix: str  # focus_subject | fix_text | enhance | separate_layers
+    session_id: str | None = None

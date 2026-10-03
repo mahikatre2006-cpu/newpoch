@@ -1,6 +1,8 @@
 import { useState } from "react";
-import type { AnalysisResult } from "../api/types";
+import type { AblationResult, AnalysisResult, FixName, Version } from "../api/types";
+import AblationPanel from "../analysis/AblationPanel";
 import Breakdown from "../analysis/Breakdown";
+import ChangeSummary, { type ChangeInfo } from "../analysis/ChangeSummary";
 import { ElementKey } from "../analysis/ElementLayer";
 import FramePanel from "../analysis/FramePanel";
 import HeatmapOverlay from "../analysis/HeatmapOverlay";
@@ -22,16 +24,36 @@ const VIEWS: { key: keyof ViewToggles; label: string; hint: string }[] = [
   { key: "safeZone", label: "Safe zone", hint: "Where YouTube's timestamp and progress bar cover the thumbnail" },
 ];
 
+const FIXES: { name: FixName; label: string; hint: string }[] = [
+  { name: "focus_subject", label: "Focus subject", hint: "Blur and darken the background, outline the subject" },
+  { name: "fix_text", label: "Fix text legibility", hint: "Outline and shadow for low-contrast or phone-illegible text" },
+  { name: "enhance", label: "Enhance", hint: "Local contrast (CLAHE) and +10% saturation" },
+  { name: "separate_layers", label: "Split into layers", hint: "Cut the subject out and open subject + background as editor layers" },
+];
+
 interface Props {
   result: AnalysisResult;
-  filename: string;
+  title: string;
   busy: boolean;
+  versions: Version[];
+  change: ChangeInfo | null;
+  ablation: AblationResult | null;
+  fixBusy: FixName | null;
+  ablateBusy: string | null;
   onNew: () => void;
   onIntent: (intent: string[] | null) => void;
+  onEdit: () => void;
+  onFix: (name: FixName) => void;
+  onAblate: (elementId: string) => void;
+  onCloseAblation: () => void;
+  onDismissChange: () => void;
+  onSelectVersion: (versionId: string) => void;
+  onCompare: () => void;
 }
 
-/** Studio (main screen): heatmap and layer views in the centre; breakdown, explanations, intent and frame stats beside it. */
-export default function Studio({ result, filename, busy, onNew, onIntent }: Props) {
+/** Studio (main screen): heatmap and layer views in the centre; breakdown, explanations, intent, fixes and versions around it. */
+export default function Studio(p: Props) {
+  const { result } = p;
   const [opacity, setOpacity] = useState(0.7);
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showElements, setShowElements] = useState(true);
@@ -46,19 +68,32 @@ export default function Studio({ result, filename, busy, onNew, onIntent }: Prop
   const fallback = result.saliency_model !== "deepgaze_iie";
   const byId = new Map(elements.map((e) => [e.id, e]));
   const hierarchy = result.hierarchy ?? [];
+  const current = p.versions.find((v) => v.analysis_id === result.analysis_id);
+  const btn = "rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-medium hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-amber-500 disabled:opacity-50 dark:border-stone-700 dark:hover:bg-stone-800";
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold">{filename}</h1>
+          <h1 className="truncate text-xl font-semibold">{p.title}</h1>
           <p className="text-sm text-stone-600 dark:text-stone-400">
             Model: {MODEL_LABEL[result.saliency_model] ?? result.saliency_model} · {result.timing_ms.total} ms{result.cached ? " (cached)" : ""}
           </p>
         </div>
-        <button type="button" onClick={onNew} className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-amber-500 dark:border-stone-700 dark:hover:bg-stone-800">
-          Analyse another
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {p.versions.length > 0 && (
+            <label className="flex items-center gap-2 text-sm">
+              Version
+              <select value={current?.version_id ?? ""} onChange={(e) => p.onSelectVersion(e.target.value)} className="max-w-48 rounded border border-stone-300 bg-transparent px-2 py-1 dark:border-stone-700">
+                {!current && <option value="">(unsaved)</option>}
+                {p.versions.map((v, i) => <option key={v.version_id} value={v.version_id} className="text-stone-900">{i + 1}. {v.label}</option>)}
+              </select>
+            </label>
+          )}
+          {p.versions.length >= 2 && <button type="button" onClick={p.onCompare} className={btn}>Compare</button>}
+          <button type="button" onClick={p.onEdit} className="rounded-lg bg-stone-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 dark:bg-amber-400 dark:text-stone-950">Edit in the editor</button>
+          <button type="button" onClick={p.onNew} className={btn}>Analyse another</button>
+        </div>
       </div>
 
       {fallback && (
@@ -67,10 +102,20 @@ export default function Studio({ result, filename, busy, onNew, onIntent }: Prop
         </div>
       )}
       {result.errors.length > 0 && (
-        <div role="status" className="rounded-lg border border-stone-300 bg-stone-100 px-4 py-2 text-xs text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
-          Notes: {result.errors.join(" · ")}
-        </div>
+        <div role="status" className="rounded-lg border border-stone-300 bg-stone-100 px-4 py-2 text-xs text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">Notes: {result.errors.join(" · ")}</div>
       )}
+
+      <fieldset className="flex flex-wrap items-center gap-2" disabled={!!p.fixBusy}>
+        <legend className="sr-only">Fixes</legend>
+        <span className="mr-1 text-sm font-medium">Fixes</span>
+        {FIXES.map((f) => (
+          <button key={f.name} type="button" title={f.hint} onClick={() => p.onFix(f.name)} className={btn}>{p.fixBusy === f.name ? "Working…" : f.label}</button>
+        ))}
+        <span className="text-xs text-stone-500 dark:text-stone-400">Each fix is re-analysed and saved as a version, so you see the measured change.</span>
+      </fieldset>
+
+      {p.change && <ChangeSummary info={p.change} onDismiss={p.onDismissChange} />}
+      {p.ablation && <AblationPanel result={result} ablation={p.ablation} onClose={p.onCloseAblation} />}
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
         <div className="space-y-3">
@@ -114,16 +159,13 @@ export default function Studio({ result, filename, busy, onNew, onIntent }: Prop
 
         <div className="space-y-4">
           {ranked.length > 0 && (
-            <IntentRanking
-              elements={ranked} order={order} setOrder={setOrder} check={result.intent_check} busy={busy}
-              onCheck={() => onIntent(order)} onClear={() => onIntent(null)}
-            />
+            <IntentRanking elements={ranked} order={order} setOrder={setOrder} check={result.intent_check} busy={p.busy} onCheck={() => p.onIntent(order)} onClear={() => p.onIntent(null)} />
           )}
           {result.frame && <FramePanel frame={result.frame} />}
         </div>
       </div>
 
-      {result.elements && <Breakdown elements={result.elements} onHover={setHover} />}
+      {result.elements && <Breakdown elements={result.elements} onHover={setHover} onAblate={p.onAblate} ablatingId={p.ablateBusy} />}
     </div>
   );
 }

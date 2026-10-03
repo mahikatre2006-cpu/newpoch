@@ -163,21 +163,27 @@ def top_driver(e: dict, f: dict) -> tuple[str | None, str]:
     key = max(cands, key=lambda k: (cands[k], k))
     if cands[key] < 0.25:
         return None, "a combination of position and size"
+    # built only for the winner: the other features may be missing (None), e.g. an element that fills the whole frame has no surroundings
     phrase = {
-        "local_contrast": f"strong local contrast ({f.get('local_contrast', 0):.2f})",
-        "saturation": f"vivid colour ({f.get('saturation_pop', 0) * 100:+.0f}% saturation over the frame average)",
-        "colour_distinctness": f"colour that stands apart from the frame (distance {f.get('colour_distinctness', 0):.0f})",
-        "face": f"being a face ({e['area_pct']:.1f}% of the frame)",
-        "centrality": f"its central position ({f.get('dist_to_center', 0):.2f} from the centre)",
-    }[key]
+        "local_contrast": lambda: f"strong local contrast ({f['local_contrast']:.2f})",
+        "saturation": lambda: f"vivid colour ({f['saturation_pop'] * 100:+.0f}% saturation over the frame average)",
+        "colour_distinctness": lambda: f"colour that stands apart from the frame (distance {f['colour_distinctness']:.0f})",
+        "face": lambda: f"being a face ({e['area_pct']:.1f}% of the frame)",
+        "centrality": lambda: f"its central position ({f['dist_to_center']:.2f} from the centre)",
+    }[key]()
     return key, phrase
+
+
+def element_kind(e: dict) -> str:
+    """Rule category: an editor layer the creator marked as text is explained like detected text."""
+    return "text" if e["type"] == "layer" and (e.get("meta") or {}).get("layer_type") == "text" else e["type"]
 
 
 def element_facts(e: dict, f: dict) -> dict:
     key, phrase = top_driver(e, f)
     sp = f.get("saturation_pop")
     return {
-        "label": e["label"], "text": e.get("text"), "type": e["type"], "attention_pct": e["attention_pct"], "area_pct": e["area_pct"],
+        "label": e["label"], "text": e.get("text"), "type": element_kind(e), "attention_pct": e["attention_pct"], "area_pct": e["area_pct"],
         "density": e["density"], "predicted_rank": e["predicted_rank"], "intent_rank": e.get("intent_rank"),
         "local_contrast": f.get("local_contrast"), "saturation_pop": sp, "saturation_pop_pct": None if sp is None else round(sp * 100, 1),
         "colour_distinctness": f.get("colour_distinctness"), "dist_to_thirds": f.get("dist_to_thirds"), "dist_to_center": f.get("dist_to_center"),
@@ -215,5 +221,5 @@ class Explainer:
             facts = element_facts(e, f)
             e["features"] = f
             e["top_driver"] = facts["top_driver"]
-            e["explanations"] = select(self.rules, e["type"], facts, MAX_PER_ELEMENT, MIN_PER_ELEMENT)
+            e["explanations"] = select(self.rules, element_kind(e), facts, MAX_PER_ELEMENT, MIN_PER_ELEMENT)
         frame["explanations"] = select(self.rules, "frame", frame_facts(frame, elements), MAX_FRAME)

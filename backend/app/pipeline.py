@@ -9,17 +9,33 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+import cv2
+import numpy as np
+
+from app.ablation import ablate as run_ablation
 from app.attention import analyze_attention, intent_check
 from app.config import load_config
 from app.elements import ElementEngine
 from app.explain import Explainer
 from app.features import compute_features
+from app.fixes import FIXES, apply_fix, make_layers
 from app.ingest import IngestError, ingest_upload, ingest_video_id
 from app.preprocess import build_context
 from app.saliency import SaliencyEngine, ScanpathEngine, encode_heatmap_png, encode_preview_jpg
 from app.storage import Store, make_store
+from app.versions import compare_results, new_version
+from app.versions.core import describe_change
 
-RESULT_FORMAT = 4  # bump when the shape or meaning of a stored result changes
+RESULT_FORMAT = 5  # bump when the shape or meaning of a stored result changes
+
+
+class LookupFailed(ValueError):
+    status = 404
+
+
+def _png(rgb: np.ndarray) -> bytes:
+    ok, buf = cv2.imencode(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_PNG_COMPRESSION, 3])
+    return buf.tobytes()
 
 
 def _ms(t0: float) -> int:
@@ -141,9 +157,14 @@ class Pipeline:
             try:
                 feat = compute_features(ctx, eset, sal.map, self.cfg, getattr(self.elements, "mobile_ocr", None))
                 frame, layer_views = feat.frame, feat.layer_views
-                self.explainer.explain(att.elements, feat.elements, frame)
             except Exception as e:  # noqa: BLE001: no features / explanations, but the attention result still stands
                 errors.append(f"features: {type(e).__name__}: {e}")
+            if frame is not None:
+                try:
+                    self.explainer.explain(att.elements, feat.elements, frame)
+                except Exception as e:  # noqa: BLE001: measurements are still useful without sentences
+                    errors.append(f"explanations: {type(e).__name__}: {e}")
+                    frame["explanations"] = []
             timing["features"] = _ms(t)
 
         t = time.perf_counter()
@@ -169,4 +190,78 @@ class Pipeline:
         }
         if self.cfg["cache"]["enabled"] and sal is not None:  # never cache a degraded result with no heatmap
             self.store.save_analysis(result, self.signature)
+            self.store.save_image(ing.sha256, _png(ing.image), layers)  # ablation and fixes work on this exact frame
         return apply_intent(result, intent, self.explainer)
+
+
+    # ---------------- M8, M10, M11: work on a stored analysis ----------------
+    def get_analysis(self, analysis_id: str) -> dict | None:
+        return self.store.get_analysis(analysis_id, self.signature)
+
+    def analysis_with_intent(self, analysis_id: str, intent: list[str] | None) -> dict | None:
+        result = self.get_analysis(analysis_id)
+        return None if result is None else apply_intent(result, intent, self.explainer)
+
+    def image_png(self, analysis_id: str) -> bytes | None:
+        stored = self.store.get_image(analysis_id)
+        return None if stored is None else stored[0]
+
+    def _load(self, analysis_id: str) -> tuple[dict, np.ndarray, list | None]:
+        result = self.get_analysis(analysis_id)
+        stored = self.store.get_image(analysis_id)
+        if result is None or stored is None:
+            raise LookupFailed("Unknown analysis: analyse the image again first")
+        png, layers = stored
+        bgr = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+        return result, cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), layers
+
+    def record_version(self, session_id: str, analysis_id: str, label: str, kind: str, parent_id: str | None = None) -> dict:
+        """Save a version. Saving the same analysis twice in a row returns the existing version instead of a duplicate."""
+        existing = self.store.list_versions(session_id)
+        if existing and existing[-1]["analysis_id"] == analysis_id:
+            return existing[-1]
+        v = new_version(session_id, analysis_id, label, kind, parent_id or (existing[-1]["version_id"] if existing else None))
+        self.store.add_version(v)
+        return self.store.get_version(v["version_id"]) or v
+
+    def versions(self, session_id: str) -> list[dict]:
+        return self.store.list_versions(session_id)
+
+    def ablate(self, analysis_id: str, element_id: str) -> dict:
+        result, image, _ = self._load(analysis_id)
+        t = time.perf_counter()
+        out = run_ablation(self.saliency, self.cfg, image, result, element_id)
+        out["timing_ms"] = {"total": _ms(t)}
+        return out
+
+    def fix(self, analysis_id: str, fix: str, session_id: str | None = None) -> dict:
+        """Apply a fix to a stored analysis. Pixel fixes are re-analysed and saved as a new version with the measured change;
+        'separate_layers' returns the two layers for the editor instead."""
+        result, image, layers = self._load(analysis_id)
+        label = FIXES.get(fix, "Separate layers" if fix == "separate_layers" else fix)
+        if fix == "separate_layers":
+            return {"fix": fix, "label": label, "layers": make_layers(image, result, self.cfg), "analysis": None}
+        fixed = apply_fix(fix, image, result, self.cfg)
+        sid = session_id or result.get("session_id") or str(uuid.uuid4())
+        before_version = next((v for v in reversed(self.store.list_versions(sid)) if v["analysis_id"] == analysis_id), None)
+        new = self.analyze(_png(fixed), layers=layers, session_id=sid)
+        diff = compare_results(result, new)
+        version = self.record_version(sid, new["analysis_id"], label, "fix", before_version["version_id"] if before_version else None)
+        new["version_id"] = version["version_id"]
+        return {"fix": fix, "label": label, "version": version, "analysis": new, "changes": diff["rows"],
+                "hierarchy_before": diff["hierarchy_a"], "hierarchy_after": diff["hierarchy_b"],
+                "message": describe_change(diff["rows"], label)}
+
+    def compare(self, version_a: str, version_b: str) -> dict:
+        va, vb = self.store.get_version(version_a), self.store.get_version(version_b)
+        if va is None or vb is None:
+            raise LookupFailed("Unknown version")
+        ra, rb = self.get_analysis(va["analysis_id"]), self.get_analysis(vb["analysis_id"])
+        if ra is None or rb is None:
+            raise LookupFailed("A version's analysis is no longer available: analyse it again")
+        diff = compare_results(ra, rb)
+
+        def side(v, r):
+            return {"version": v, "image_jpg": r["image_jpg"], "heatmap_png": r["heatmap_png"], "saliency_model": r["saliency_model"]}
+
+        return {"a": side(va, ra), "b": side(vb, rb), **diff}

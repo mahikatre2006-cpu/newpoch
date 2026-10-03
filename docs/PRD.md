@@ -263,7 +263,8 @@ Measured per element (E) and for the frame (F). These are the only inputs explan
 
 - Input: analysis ID + element ID.
 - Remove the element: small elements (text, graphics) with `cv2.inpaint` (Telea); large elements (subject, face) by filling the mask with a heavily blurred version of the surrounding background.
-- Re-run M3 on the edited image; compute new shares for the remaining elements.
+- Re-run M3 on the edited image; compute new shares for the remaining elements. The removed pixels now show background, so they are counted as background: this makes the remaining elements' changes add up to exactly the removed share.
+- Which method: face, subject and anything covering 8% of the frame or more use the blurred fill (normalised convolution at growing blur radii, so big holes fill from the edges inward); the rest use Telea inpainting. The response includes the edited image so the user sees what was removed.
 - Output: original share of the removed element and **where it went** (delta per remaining element), plus the ablated heatmap.
 - Message example: "Without the arrow, its 15% splits: background +9%, product +4%, title +2%."
 - **Done when:** deltas sum to the removed share (±1%) and the UI shows a flow view.
@@ -273,7 +274,7 @@ Measured per element (E) and for the frame (F). These are the only inputs explan
 - react-konva canvas at 1280×720, display-scaled.
 - Layer types: image, subject cutout, text (font, size, fill, stroke, shadow), shape (rect, circle, arrow).
 - Each layer has a name the user can edit; names flow into the breakdown.
-- On change (debounced 600 ms): export flattened PNG + per-layer alpha masks → `/analyze` with `layers`.
+- On change (debounced 600 ms): export the flattened 1280×720 PNG plus one mask per layer → `/analyze` with `layers`. Each entry is `{name, type, mask, text?}`, bottom to top: `mask` is a base64 PNG whose alpha channel is the layer's coverage (its colour is zeroed, so a photo layer stays a few KB; a grey PNG without alpha is also accepted), `text` is the exact string for text layers, so the server measures their contrast and phone legibility without OCR and applies the text rules to them. The layer on top owns an overlapping pixel; pixels no layer covers are "Uncovered". A stale response is ignored if a newer edit exists.
 - **Attention budget bar:** horizontal stacked bar of attention per layer, updated after each analysis, with arrows showing change since the last run.
 - Panels: heatmap toggle, layer views, intent ranking, explanations.
 - **Done when:** moving a text layer visibly changes its share in the budget bar.
@@ -282,20 +283,24 @@ Measured per element (E) and for the frame (F). These are the only inputs explan
 
 Each fix produces a new version, re-runs analysis, and reports the attention change for the affected elements.
 
-| Fix | Method | Works on |
+| Fix | Method | Where it runs |
 | --- | --- | --- |
-| Focus subject | Background: Gaussian blur + darken 25%; subject: 6 px outline from dilated mask | Flat images and editor |
-| Fix text legibility | Add stroke and shadow; increase size in steps until mobile legibility passes | Editor text layers |
-| Clear safe zone | Move overlapping layers up/left out of the safe zone | Editor layers |
-| Enhance | CLAHE on LAB L channel, +10% saturation | Flat images and editor |
-| Separate layers | rembg cutout → subject layer + background layer | Flat images → editor |
+| Focus subject | Background (not subject, face or text): Gaussian blur and darken 25%; subject and faces outlined 6 px in white | Server, on the stored frame (flat images and editor exports) |
+| Fix text legibility | Text that fails 4.5:1 contrast or phone legibility: outline in the opposite tone plus a soft shadow, on the letter pixels only (the letters stay as they were). In the editor, text layers get a stroke and shadow first and grow 15% on each further click | Server for flat images; editor for text layers |
+| Enhance | CLAHE on the LAB lightness channel, +10% saturation | Server |
+| Clear safe zone | Move layers overlapping the timestamp badge or progress bar up (or left) just out of the way | Editor (it owns the layers) |
+| Separate layers | Subject cut-out (subject and faces, feathered) plus the picture with the subject filled in from its surroundings; opens as two layers in the editor. Text stays in the background picture | Server returns the two images; editor opens them |
 | Rebalance (stretch) | Move the intended #1 layer to the nearest thirds point | Editor layers |
 
+Text colour is measured against the colour directly behind the text: for detected text blocks that is the rim just inside the block's edge (so white text on a dark pill is judged against the pill), for editor text layers (whose mask is the letters themselves) it is the ring just outside the mask.
+
+- Every pixel fix is re-analysed, saved as a new version and reported with the measured per-element change. Editor fixes are verified the same way: the next analysis after the edit is compared with the measurements taken before it.
 - Message example: "Focus subject: subject 21% → 44%, background 52% → 30%."
 
 ### M11. Versions and comparison
 
-- Every analyze/fix in a session saves a version (image, layers JSON, analysis result).
+- A version is saved for an upload (`save_version`), for every fix, and when the editor's "Save version" is pressed. Not every debounced editor edit: saving the same analysis twice in a row returns the existing version. The stored frame and layers are kept per analysis so any version can be reopened, ablated, fixed or compared.
+- Elements are matched across versions by editor layer name, or for detected elements by type and mask overlap (IoU 0.25 or more); unmatched ones are shown as "new" or "no longer found".
 - Compare view: two heatmaps side by side, per-element attention change table, hierarchy before/after.
 
 ### M12. YouTube context (YouTube Data API v3)
@@ -354,7 +359,9 @@ Pre-download all weights before the event; the demo machine must run the core of
 
 | Method | Path | Body | Returns |
 | --- | --- | --- | --- |
-| POST | `/analyze` | `image` file, optional `layers` JSON, optional `intent` (element ids in order) | Analysis result |
+| POST | `/analyze` | `image` file, optional `layers` JSON, `intent`, `session_id`, `save_version`, `label` | Analysis result |
+| GET | `/analysis/{id}` | optional `intent` (JSON list) | A stored analysis, with the intended order applied |
+| GET | `/image/{id}` | — | The stored 1280×720 frame (PNG) |
 | POST | `/ablate` | `analysis_id`, `element_id` | Ablation result |
 | POST | `/fix` | `analysis_id`, `fix` (focus_subject, fix_text, clear_safe_zone, enhance, separate_layers), optional `layers` | New version + analysis + changes |
 | GET | `/versions/{session_id}` | — | Version list |
@@ -447,6 +454,7 @@ Pre-download all weights before the event; the demo machine must run the core of
     {"element_id": "text_0", "delta_pct": 1.7}
   ],
   "ablated_heatmap_png": "base64...",
+  "ablated_image_jpg": "base64...",
   "message": "Without the arrow, its 15% splits: background +9.1%, product +4.2%, title +1.7%."
 }
 ```

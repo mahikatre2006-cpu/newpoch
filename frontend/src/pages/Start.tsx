@@ -7,10 +7,11 @@ interface Props {
   busy: boolean;
   onFile: (file: File) => void;
   onError: (msg: string) => void;
+  onOpenEditor: () => void;
 }
 
 /** Start screen: upload (drop, choose or paste). Editor and channel import join here in later phases. */
-export default function Start({ busy, onFile, onError }: Props) {
+export default function Start({ busy, onFile, onError, onOpenEditor }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
   const [samples, setSamples] = useState<{ file: string; label: string }[]>([]);
@@ -64,6 +65,14 @@ export default function Start({ busy, onFile, onError }: Props) {
         </button>
         <input ref={input} type="file" accept={OK_TYPES.join(",")} hidden onChange={(e) => { accept(e.target.files?.[0]); e.target.value = ""; }} />
       </div>
+
+      <p className="mt-4 text-sm text-stone-600 dark:text-stone-400">
+        Or{" "}
+        <button type="button" onClick={onOpenEditor} className="font-medium text-stone-900 underline underline-offset-2 hover:text-amber-700 focus-visible:outline-2 focus-visible:outline-amber-500 dark:text-stone-100">
+          build a thumbnail in the editor
+        </button>{" "}
+        and watch where attention goes as you edit.
+      </p>
 
       {samples.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">

@@ -36,7 +36,7 @@ export default function FramePanel({ frame }: { frame: Frame }) {
           </div>
         )}
       </dl>
-      {frame.explanations.length > 0 && (
+      {(frame.explanations?.length ?? 0) > 0 && (
         <ul className="mt-3 list-disc space-y-0.5 pl-4 text-xs text-stone-700 dark:text-stone-300">
           {frame.explanations.map((m, i) => <li key={i}>{m}</li>)}
         </ul>

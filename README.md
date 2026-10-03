@@ -15,7 +15,7 @@ npm install
 npm run dev                                                   # http://localhost:5174, /api is proxied to :8000
 ```
 
-Phase checks (timings, overlays and contact sheets land in `data/phase1/` and `data/phase2/`):
+Phase checks (timings, overlays and contact sheets land in `data/phase1/` ... `data/phase5/`; `phase5_check.py` verifies ablation sums and runs every fix on real thumbnails):
 `python scripts\phase1_check.py` (heatmaps) and `python scripts\phase2_check.py` (elements: every pixel in exactly one element, shares sum to 100%), run from `backend/` with the venv.
 
 ## Setup that is not in git
