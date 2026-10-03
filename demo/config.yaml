@@ -1,0 +1,56 @@
+# Gaze Tracking Demo — all tunables live here, nothing hard-coded in modules.
+
+model:
+  # ETH-XGaze ResNet-18 checkpoint.  Download once, place in demo/weights/.
+  # Source: https://github.com/ChiShengChen/gaze_track_webcam
+  weights: weights/eth-xgaze_resnet18.pth
+  device: cpu            # cpu | cuda | mps
+  input_size: 224        # face patch fed to the CNN
+
+camera:
+  index: 0
+  width: 640
+  height: 480
+
+thumbnail:
+  path: thumbnails/tech_review.jpg
+  display_size: [1280, 720]
+
+calibration:
+  points: 5              # number of calibration targets
+  save_path: calibration.yaml
+  marker_radius: 20      # px, radius of the dot the judge looks at
+  marker_color: [0, 220, 255]   # bright yellow-orange in BGR
+  hold_time_s: 1.5       # seconds to stare at each point
+  bg_color: [30, 30, 30]
+
+smoothing:
+  ema_alpha: 0.3         # 0 = max smooth (laggy), 1 = no smooth (jittery)
+  window_size: 5         # multi-frame averaging fallback
+
+tracking:
+  duration_s: 4          # how long to track before generating heatmap
+  fps_target: 30
+
+blob:
+  inner_radius: 14
+  outer_radius: 50
+  inner_color: [255, 255, 255]   # white core (BGR)
+  outer_color: [0, 180, 255]     # amber/gold glow (BGR)
+  opacity: 0.75
+  pulse_hz: 1.5          # breathing animation frequency
+  trail_length: 10       # number of trailing ghost positions
+
+heatmap:
+  sigma: 42              # Gaussian blur sigma in pixels (on 1280x720)
+  alpha: 0.65            # blend opacity of heatmap over thumbnail
+  colormap: COLORMAP_INFERNO
+  low_cut: 0.08          # attention below this fraction is fully transparent
+
+ui:
+  fullscreen: true
+  splash_duration_s: 2.0
+  fade_duration_s: 0.5
+  font_scale: 1.2
+  font_color: [255, 255, 255]
+  countdown_color: [0, 220, 255]

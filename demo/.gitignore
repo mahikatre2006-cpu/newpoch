@@ -1,0 +1,10 @@
+# Demo ignore
+.venv/
+__pycache__/
+*.pyc
+weights/*
+!weights/.gitkeep
+.cache/
+calibration.yaml
+*.task
+*.safetensors

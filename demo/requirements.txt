@@ -1,0 +1,22 @@
+# Standalone Gaze Tracking Demo — dependencies
+# Isolated from the core backend/requirements.txt to avoid conflicts.
+# Pinned versions match the dev laptop's known-good set (Windows Application Control).
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
+
+# opencv-contrib-python (NOT headless) — demo needs cv2.imshow()
+# Never install alongside opencv-python or opencv-python-headless.
+opencv-contrib-python==4.11.0.86
+
+mediapipe==0.10.35
+numpy==2.0.2
+scipy
+pyyaml
+timm
+huggingface_hub
+safetensors
+fastapi
+uvicorn[standard]
+python-multipart
